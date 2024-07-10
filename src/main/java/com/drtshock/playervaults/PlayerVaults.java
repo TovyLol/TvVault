@@ -37,6 +37,7 @@ import com.drtshock.playervaults.listeners.Listeners;
 import com.drtshock.playervaults.listeners.SignListener;
 import com.drtshock.playervaults.listeners.VaultPreloadListener;
 import com.drtshock.playervaults.tasks.Cleanup;
+import com.drtshock.playervaults.vaultmanagement.CardboardBox;
 import com.drtshock.playervaults.vaultmanagement.EconomyOperations;
 import com.drtshock.playervaults.vaultmanagement.VaultManager;
 import com.drtshock.playervaults.vaultmanagement.VaultViewInfo;
@@ -61,7 +62,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.kitteh.cardboardbox.CardboardBox;
 import sun.misc.Unsafe;
 
 import java.io.BufferedReader;
@@ -141,16 +141,12 @@ public class PlayerVaults extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        if (!CardboardBox.isReady()) {
-            Exception ex = null;
-            try {
-                CardboardBox.serializeItem(new ItemStack(Material.STONE));
-            } catch (Exception e) {
-                ex = e;
-            }
-            this.getLogger().log(Level.SEVERE, "Could not initialize!", ex);
+        if (!CardboardBox.init()) {
+            this.getLogger().log(Level.SEVERE, "Could not initialize CARDBOARD!");
             this.getServer().getPluginManager().disablePlugin(this);
             return;
+        } else {
+            this.getLogger().log(Level.SEVERE, "it might work");
         }
         instance = this;
         long start = System.currentTimeMillis();

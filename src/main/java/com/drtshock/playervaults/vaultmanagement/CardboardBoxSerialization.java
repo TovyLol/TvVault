@@ -9,6 +9,7 @@ import org.yaml.snakeyaml.external.biz.base64Coder.Base64Coder;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
+import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.logging.Level;
@@ -44,7 +45,7 @@ public class CardboardBoxSerialization {
         DataOutputStream out = new DataOutputStream(bytes);
         out.writeInt(contents.length);
         for (ItemStack content : contents) {
-            byte[] item = CardboardBox.serializeItem(content);
+            byte[] item = CardboardBox.playerInventoryToBase64(content);
             out.writeInt(item.length);
             out.write(item);
         }
@@ -59,7 +60,7 @@ public class CardboardBoxSerialization {
             int len = input.readInt();
             byte[] itemBytes = new byte[len];
             input.readFully(itemBytes);
-            contents[i] = CardboardBox.deserializeItem(itemBytes);
+            contents[i] = CardboardBox.fromBase64(itemBytes);
         }
         return contents;
     }

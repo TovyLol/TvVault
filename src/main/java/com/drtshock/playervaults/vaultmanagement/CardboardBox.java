@@ -3,7 +3,10 @@ package com.drtshock.playervaults.vaultmanagement;
 import com.mojang.datafixers.DSL;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,10 +19,6 @@ import java.util.Base64;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Cardboard Box!
- */
-@SuppressWarnings("UnqualifiedStaticUsage")
 public class CardboardBox {
     private static final int OLD_DATA_VERSION = 1343;
 
@@ -57,13 +56,13 @@ public class CardboardBox {
         init();
     }
 
-    private static void init() {
+    public static boolean init() {
         try {
             ItemStack.class.getDeclaredMethod("deserializeBytes", byte[].class);
             ItemStack.class.getDeclaredMethod("serializeAsBytes");
             modernPaper = true;
             failure = false;
-            return;
+            return true;
         } catch (Exception ignored) {
         }
         try {
@@ -99,7 +98,6 @@ public class CardboardBox {
                 nmsDataConverterTypes = "net.minecraft.util.datafix.fixes.DataConverterTypes";
                 nmsDataConverterRegistry = "net.minecraft.util.datafix.DataConverterRegistry";
             }
-
 
             // Time to load ALL the things!
 
@@ -180,131 +178,157 @@ public class CardboardBox {
                 }
                 dynamicGetValue = dynamicClass.getMethod("getValue");
                 hasDataVersion = true;
-            } catch (Exception ignored) {
+            } catch (Throwable ignored) {
             }
             failure = false;
-        } catch (Exception e) {
-            exception = e;
-        }
-    }
-
-    /**
-     * Gets if Cardboard Box will just use Paper's built-in functionality.
-     *
-     * @return true if the built-in methods exist, eliminating stress
-     */
-    public static boolean isModernPaperSupport() {
-        return modernPaper;
-    }
-
-    /**
-     * Gets if Cardboard Box is ready to work, or failed to initialize.
-     *
-     * @return true if ready
-     */
-    public static boolean isReady() {
-        if (modernPaper) {
             return true;
+        } catch (Exception e) {
+            failure = true;
+            exception = e;
+            return false;
         }
-        if (!failure && testPending) {
-            testPending = false;
-            try {
-                // TODO come up with an insane itemstack to deserialize and reserialize as a test.
-                ItemStack itemStack = new ItemStack(Material.DIRT);
-                deserializeItem(serializeItem(itemStack));
-            } catch (Exception e) {
-                failure = true;
-                exception = e;
-            }
-        }
-        return !failure;
     }
 
-    // The below are modeled on the work of Mariell Hoversholm (Proximyst)
-    //  released under GPLv3 for the Paper project
-
-    /**
-     * Serializes an ItemStack to bytes. Will store air and null the same, as
-     * just a single byte of 0x0.
-     *
-     * @param item item to serialize
-     * @return bytes of the item serialized
-     * @throws IllegalStateException if CardboardBox failed to initialize
-     * (check with {@link #isReady()})
-     * @throws RuntimeException if serialization failed for any reason
-     */
-    public static byte[] serializeItem(ItemStack item) {
+    public static String toBase64(ItemStack item) {
         if (failure) {
-            throw new IllegalStateException("Cardboard Box failed to initialize. Cannot serialize without risk.", exception);
+            throw new IllegalStateException("Exception in CardboardBox", exception);
         }
         if (item == null || item.getType() == Material.AIR) {
-            return new byte[]{0x0};
+            return null;
         }
-        if (modernPaper) {
-            return item.serializeAsBytes();
-        }
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         try {
             Object nmsItem;
-            if (craftItemStack.isAssignableFrom(item.getClass())) {
-                nmsItem = craftItemStackHandle.get(item);
+            if (modernPaper) {
+                nmsItem = item.getClass().getMethod("serializeAsBytes").invoke(item);
             } else {
                 nmsItem = craftItemStackAsNMSCopy.invoke(null, item);
+                if (nmsItem == null) {
+                    return null;
+                }
+                if (hasDataVersion) {
+                    Object compound = nbtTagCompoundConstructor.newInstance();
+                    itemStackSave.invoke(nmsItem, compound);
+                    nbtTagCompoundSetInt.invoke(compound, "DataVersion", dataVersion);
+                    nmsItem = nbtCompressedStreamToolsWrite.invoke(null, compound, (OutputStream) null);
+                } else {
+                    nmsItem = nbtCompressedStreamToolsWrite.invoke(null, itemStackSave.invoke(nmsItem, nbtTagCompoundConstructor.newInstance()), (OutputStream) null);
+                }
             }
-            Object compound = itemStackSave.invoke(nmsItem, nbtTagCompoundConstructor.newInstance());
-            if (hasDataVersion) {
-                nbtTagCompoundSetInt.invoke(compound, "DataVersion", dataVersion);
-            }
-            nbtCompressedStreamToolsWrite.invoke(null, compound, outputStream);
+            return Base64.getEncoder().encodeToString((byte[]) nmsItem);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize item stack\n" + item, e);
+            throw new IllegalStateException("Exception in CardboardBox", e);
         }
-        return outputStream.toByteArray();
     }
 
-    /**
-     * Deserializes an ItemStack previously serialized by Cardboard Box. Will
-     * return air for a null or empty array of data.
-     *
-     * @param data data to deserialize
-     * @return the ItemStack
-     * @throws IllegalArgumentException if the stored item's version is
-     * greater than the current server data version
-     * @throws IllegalStateException if CardboardBox failed to initialize
-     * (check with {@link #isReady()})
-     * @throws RuntimeException if deserialization failed for any reason
-     */
-    public static ItemStack deserializeItem(byte[] data) {
+    public static ItemStack fromBase64(byte[] data) {
         if (failure) {
-            throw new IllegalStateException("Cardboard Box failed to initialize. Cannot serialize without risk.", exception);
+            throw new IllegalStateException("Exception in CardboardBox", exception);
         }
-        if (data == null || data.length == 0 || (data.length == 1 && data[0] == 0x0)) {
+        if (data == null) {
             return new ItemStack(Material.AIR);
         }
-        if (modernPaper) {
-            return ItemStack.deserializeBytes(data);
-        }
         try {
-            Object compound;
-            if (nbtAccounterUnlimitedHeap == null) {
-                compound = nbtCompressedStreamToolsRead.invoke(null, new ByteArrayInputStream(data));
+            byte[] decoded = Base64.getDecoder().decode(data);
+            Object nmsItem;
+            if (modernPaper) {
+                nmsItem = ItemStack.class.getDeclaredMethod("deserializeBytes", byte[].class).invoke(null, decoded);
             } else {
-                compound = nbtCompressedStreamToolsRead.invoke(null, new ByteArrayInputStream(data), nbtAccounterUnlimitedHeap.invoke(null));
+                Object nbtTagCompound = nbtCompressedStreamToolsRead.invoke(null, new ByteArrayInputStream(decoded), (InputStream) nbtAccounterUnlimitedHeap.invoke(null));
+                if (itemStackConstructor != null) {
+                    nmsItem = itemStackConstructor.newInstance(nbtTagCompound);
+                } else {
+                    if (hasDataVersion && (int) nbtTagCompoundGetInt.invoke(nbtTagCompound, "DataVersion") < OLD_DATA_VERSION) {
+                        nbtTagCompound = dynamicGetValue.invoke(dataFixerUpdate.invoke(dataConverterRegistryDataFixer, dataConverterTypesItemStack, newDynamic(nbtTagCompound), (int) nbtTagCompoundGetInt.invoke(nbtTagCompound, "DataVersion"), OLD_DATA_VERSION));
+                    }
+                    nmsItem = itemStackFromCompound.invoke(null, nbtTagCompound);
+                }
+            }
+            return (ItemStack) craftItemStackAsCraftMirror.invoke(null, nmsItem);
+        } catch (Exception e) {
+            throw new IllegalStateException("Exception in CardboardBox", e);
+        }
+    }
+
+    private static Object newDynamic(Object nbtTagCompound) throws Exception {
+        return dynamic.newInstance(dynamicOpsNBT, nbtTagCompound);
+    }
+
+    public static byte[] playerInventoryToBase64(ItemStack playerInventory) throws IllegalStateException {
+        try {
+            String content = toBase64(playerInventory);
+            return Base64.getEncoder().encode(content.getBytes());
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to save player inventory.", e);
+        }
+    }
+
+    public static String itemStackArrayToBase64(ItemStack[] items) throws IllegalStateException {
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream);
+
+            dataOutput.writeInt(items.length);
+
+            for (ItemStack item : items) {
+                dataOutput.writeObject(item);
             }
 
-            if (hasDataVersion) {
-                int version = (int) nbtTagCompoundGetInt.invoke(compound, "DataVersion");
-                if (version == 0) {
-                    version = OLD_DATA_VERSION;
-                }
-                if (version > dataVersion) {
-                    throw new IllegalArgumentException("Attempting to load an item of version " + version + " but this server is version " + dataVersion);
-                }
-                compound = dynamicGetValue.invoke(dataFixerUpdate.invoke(dataConverterRegistryDataFixer, dataConverterTypesItemStack, dynamic.newInstance(dynamicOpsNBT, compound), version, dataVersion));
-            }
-            return (ItemStack) craftItemStackAsCraftMirror.invoke(null, itemStackFromCompound == null ? itemStackConstructor.newInstance(compound) : itemStackFromCompound.invoke(null, compound));
+            dataOutput.close();
+            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
         } catch (Exception e) {
-            throw new RuntimeException("Failed to deserialize item stack\n" + Base64.getEncoder().encodeToString(data), e);
+            throw new IllegalStateException("Unable to save item stacks.", e);
+        }
+    }
+
+    public static String toBase64(Inventory inventory) throws IllegalStateException {
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream);
+
+            dataOutput.writeInt(inventory.getSize());
+
+            for (int i = 0; i < inventory.getSize(); i++) {
+                dataOutput.writeObject(inventory.getItem(i));
+            }
+
+            dataOutput.close();
+            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to save item stacks.", e);
+        }
+    }
+
+    public static Inventory inventoryFromBase64(String data) throws IllegalStateException {
+        try {
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(data));
+            BukkitObjectInputStream dataInput = new BukkitObjectInputStream(inputStream);
+            Inventory inventory = Bukkit.getServer().createInventory(null, dataInput.readInt());
+
+            for (int i = 0; i < inventory.getSize(); i++) {
+                inventory.setItem(i, (ItemStack) dataInput.readObject());
+            }
+
+            dataInput.close();
+            return inventory;
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to decode class type.", e);
+        }
+    }
+
+    public static ItemStack[] itemStackArrayFromBase64(String data) throws IllegalStateException {
+        try {
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(Base64.getDecoder().decode(data));
+            BukkitObjectInputStream dataInput = new BukkitObjectInputStream(inputStream);
+            ItemStack[] items = new ItemStack[dataInput.readInt()];
+
+            for (int i = 0; i < items.length; i++) {
+                items[i] = (ItemStack) dataInput.readObject();
+            }
+
+            dataInput.close();
+            return items;
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to decode class type.", e);
         }
     }
 }

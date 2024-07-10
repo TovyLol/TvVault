@@ -52,6 +52,9 @@ public class VaultCommand implements CommandExecutor {
             }
 
             switch (args.length) {
+                case 0 :
+
+                    break;
                 case 1:
                     if (VaultOperations.openOwnVault(player, args[0], true)) {
                         PlayerVaults.getInstance().getInVault().put(player.getUniqueId().toString(), new VaultViewInfo(player.getUniqueId().toString(), Integer.parseInt(args[0])));
