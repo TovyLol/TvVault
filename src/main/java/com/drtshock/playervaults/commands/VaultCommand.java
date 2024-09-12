@@ -32,6 +32,7 @@ import org.bukkit.entity.Player;
 
 public class VaultCommand implements CommandExecutor {
     private final PlayerVaults plugin;
+    private final Game
 
     public VaultCommand(PlayerVaults plugin) {
         this.plugin = plugin;
